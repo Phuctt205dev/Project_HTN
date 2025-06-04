@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Dashboard Đèn Giao Thông Thông Minh</title>
+  <!-- Thư viện MQTT để giao tiếp với ESP32 thông qua Internet -->
+  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+  <!-- Font chữ đẹp từ Google -->
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap" rel="stylesheet">
+
+  <style>
+    /* CÀI ĐẶT CHUNG CHO TRANG WEB */
+    body {
+      font-family: 'Roboto', sans-serif; /* Sử dụng font đẹp dễ đọc */
+      background: radial-gradient(circle at center, #99f2ff, #007fff); /* Nền màu chuyển mượt */
+      margin: 0;
+      padding: 0;
+      color: #000;
+    }
+
+    h1 {
+      text-align: center;
+      color: #003c6c;
+      padding: 30px;
+      margin: 0;
+      background-color: rgba(255,255,255,0.3); /* Nền mờ cho tiêu đề */
+      box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    }
+
+    /* THÔNG BÁO TRẠNG THÁI KẾT NỐI MQTT */
+    #mqtt-status {
+      font-weight: bold;
+      padding: 15px;
+      margin: 20px auto;
+      width: fit-content;
+      border-radius: 10px;
+      text-align: center;
+      background-color: #fff3cd;
+      color: #856404;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    }
+
+    /* GIAO DIỆN CHÍNH - 2 ĐƯỜNG */
+    .dashboard {
+      display: flex;
+      justify-content: space-around;
+      flex-wrap: wrap;
+      gap: 30px;
+      padding: 20px;
+    }
+
+    /* THẺ THÔNG TIN TỪNG ĐƯỜNG */
+    .traffic-card {
+      background: #ffffffcc; /* Nền trắng mờ */
+      border-radius: 20px;
+      box-shadow: 0 8px 16px rgba(0,0,0,0.15);
+      padding: 25px;
+      width: 350px;
+      transition: transform 0.3s, background-color 0.3s;
+    }
+
+    .traffic-card:hover {
+      transform: translateY(-5px);
+      background-color: #e0f7fa; /* Hiệu ứng khi rê chuột */
+    }
+
+    .traffic-card h3 {
+      margin-bottom: 20px;
+      color: #00695c;
+      font-size: 22px;
+    }
+
+    .info-row {
+      margin-bottom: 10px;
+      font-size: 16px;
+    }
+
+    .label {
+      font-weight: bold;
+    }
+
+    /* PHẦN NHẬP LIỆU KHI Ở CHẾ ĐỘ TỰ ĐIỀU KHIỂN */
+    .manual-section {
+      background-color: #e0f7fa;
+      border-radius: 8px;
+      padding: 6px 4px;
+      margin-top: 10px;
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.07);
+      border: 1px solid #b2ebf2;
+    }
+
+    .manual-section label {
+      display: flex;
+      align-items: center;
+      margin: 0;
+      font-size: 18px;
+      gap: 2px;
+      color: #00796b;
+      font-weight: 500;
+    }
+
+    .manual-section input[type="number"] {
+      width: 45px;
+      padding: 3px 4px;
+      font-size: 18px;
+      border: 1px solid #b2ebf2;
+      border-radius: 5px;
+      background: #fff;
+      outline: none;
+      text-align: center;
+      transition: border 0.2s;
+    }
+
+    .manual-section input[type="number"]:focus {
+      border: 1.5px solid #00bcd4;
+      background: #e0f2f1;
+    }
+
+    /* NÚT GỬI DỮ LIỆU */
+    button {
+      padding: 15px 30px;
+      background-color: #00796b;
+      color: #fff;
+      border: none;
+      border-radius: 10px;
+      font-size: 16px;
+      font-weight: bold;
+      cursor: pointer;
+      transition: 0.3s;
+      margin: 30px auto;
+      display: block;
+    }
+
+    button:hover {
+      background-color: #004d40;
+      transform: scale(1.05);
+    }
+
+    button:active {
+      transform: scale(0.98);
+    }
+
+    /* CHẾ ĐỘ BẬT/TẮT TỰ ĐỘNG */
+    #mode-container {
+      text-align: center;
+      margin: 20px 0;
+    }
+
+    #smartModeButton {
+      padding: 12px 25px;
+      border-radius: 25px;
+      font-size: 16px;
+      cursor: pointer;
+      transition: all 0.3s;
+      border: none;
+      color: white;
+      background-color: #4CAF50;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+    }
+
+    #smartModeButton.off {
+      background-color: #f44336;
+    }
+
+    .manual-disabled {
+      opacity: 0.6;
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+  <!-- TIÊU ĐỀ CHÍNH -->
+  <h1>🛣️ Giao diện điều khiển đèn giao thông thông minh</h1>
+
+  <!-- HIỂN THỊ TRẠNG THÁI KẾT NỐI MQTT -->
+  <div id="mqtt-status">Đang kết nối tới MQTT Broker...</div>
+
+  <!-- NÚT CHUYỂN ĐỔI CHẾ ĐỘ -->
+  <div id="mode-container">
+    <button id="smartModeButton" onclick="toggleSmartMode()">Chế độ thông minh: BẬT</button>
+  </div>
+
+  <!-- HIỂN THỊ 2 ĐƯỜNG VỚI CÁC DỮ LIỆU -->
+  <div class="dashboard">
+    <!-- ĐƯỜNG 1 -->
+    <div class="traffic-card">
+      <h3>🚗 Đường 1</h3>
+      <div class="info-row"><span class="label">Đèn hiện tại:</span> <span id="light1">Đang tải...</span></div>
+      <div class="info-row"><span class="label">Thời gian còn lại:</span> <span id="time1">0</span>s</div>
+      <div class="info-row"><span class="label">Số lượng xe:</span> <span id="cars1">0</span></div>
+      <div class="manual-section">
+        <label>🟢 Xanh: <input type="number" id="green1" placeholder="10"></label>
+      </div>
+    </div>
+
+    <!-- ĐƯỜNG 2 -->
+    <div class="traffic-card">
+      <h3>🚗 Đường 2</h3>
+      <div class="info-row"><span class="label">Đèn hiện tại:</span> <span id="light2">Đang tải...</span></div>
+      <div class="info-row"><span class="label">Thời gian còn lại:</span> <span id="time2">0</span>s</div>
+      <div class="info-row"><span class="label">Số lượng xe:</span> <span id="cars2">0</span></div>
+      <div class="manual-section">
+        <label>🟢 Xanh: <input type="number" id="green2" placeholder="10"></label>
+      </div>
+    </div>
+  </div>
+
+  <!-- NÚT GỬI DỮ LIỆU MANUAL ĐẾN ESP32 -->
+  <button onclick="sendControl()">📤 Gửi thời gian điều chỉnh</button>
+
+  <script>
+    // KẾT NỐI TỚI MQTT BROKER QUA WEBSOCKET
+    const client = mqtt.connect("ws://172.20.10.2:9003");
+    const statusDiv = document.getElementById("mqtt-status");
+    let isSmartMode = true;
+    const manualSections = document.querySelectorAll('.manual-section');
+    const manualInputs = document.querySelectorAll('.manual-section input');
+
+    // CHUYỂN ĐỔI CHẾ ĐỘ THÔNG MINH
+    function toggleSmartMode() {
+      isSmartMode = !isSmartMode;
+      const button = document.getElementById('smartModeButton');
+      button.textContent = `Chế độ thông minh: ${isSmartMode ? 'BẬT' : 'TẮT'}`;
+      button.classList.toggle('off', !isSmartMode);
+      manualSections.forEach(section => {
+        section.classList.toggle('manual-disabled', isSmartMode);
+      });
+      manualInputs.forEach(input => {
+        input.disabled = isSmartMode;
+      });
+      client.publish("control/mode", isSmartMode ? "on" : "off");
+    }
+
+    // KHI KẾT NỐI THÀNH CÔNG VỚI BROKER
+    client.on("connect", () => {
+      statusDiv.textContent = "✅ Đã kết nối MQTT Broker";
+      statusDiv.style.backgroundColor = "#c8e6c9";
+      statusDiv.style.color = "#1b5e20";
+      client.subscribe("traffic/road1");
+      client.subscribe("traffic/road2");
+      client.subscribe("vehicles/road1");
+      client.subscribe("vehicles/road2");
+      client.subscribe("status/mode");
+    });
+
+    // CÁC SỰ KIỆN KHI MẤT KẾT NỐI
+    client.on("offline", () => {
+      statusDiv.textContent = "❌ Mất kết nối MQTT Broker";
+      statusDiv.style.backgroundColor = "#ffcdd2";
+      statusDiv.style.color = "#b71c1c";
+    });
+
+    client.on("reconnect", () => {
+      statusDiv.textContent = "🔄 Đang kết nối lại MQTT Broker...";
+      statusDiv.style.backgroundColor = "#fff9c4";
+      statusDiv.style.color = "#f57f17";
+    });
+
+    // NHẬN TIN NHẮN TỪ MQTT VÀ CẬP NHẬT GIAO DIỆN
+    client.on("message", (topic, message) => {
+      const msg = message.toString();
+      if (topic === "vehicles/road1") {
+        document.getElementById("cars1").textContent = msg;
+      } else if (topic === "vehicles/road2") {
+        document.getElementById("cars2").textContent = msg;
+      } else if (topic === "traffic/road1") {
+        const data = JSON.parse(msg);
+        document.getElementById("light1").textContent = mapLight(data.light);
+        document.getElementById("time1").textContent = data.time;
+      } else if (topic === "traffic/road2") {
+        const data = JSON.parse(msg);
+        document.getElementById("light2").textContent = mapLight(data.light);
+        document.getElementById("time2").textContent = data.time;
+      } else if (topic === "status/mode") {
+        isSmartMode = msg === "on";
+        const button = document.getElementById('smartModeButton');
+        button.textContent = `Chế độ thông minh: ${isSmartMode ? 'BẬT' : 'TẮT'}`;
+        button.classList.toggle('off', !isSmartMode);
+        manualSections.forEach(section => {
+          section.classList.toggle('manual-disabled', isSmartMode);
+        });
+        manualInputs.forEach(input => {
+          input.disabled = isSmartMode;
+        });
+      }
+    });
+
+    // HÀM CHUYỂN ĐỔI TÊN MÀU ĐÈN
+    function mapLight(raw) {
+      switch (raw.toLowerCase()) {
+        case "red": return "Đỏ 🔴";
+        case "green": return "Xanh 🟢";
+        case "yellow": return "Vàng 🟡";
+        default: return raw;
+      }
+    }
+
+    // GỬI THỜI GIAN THỦ CÔNG ĐẾN ESP32
+    function sendControl() {
+      if(isSmartMode) {
+        alert("Vui lòng tắt chế độ thông minh trước khi điều chỉnh thủ công!");
+        return;
+      }
+
+      const controlData = {
+        road1: {
+          green: parseInt(document.getElementById("green1").value || 0),
+          red: parseInt(document.getElementById("red1").value || 0)
+        },
+        road2: {
+          green: parseInt(document.getElementById("green2").value || 0),
+          red: parseInt(document.getElementById("red2").value || 0)
+        }
+      };
+      client.publish("control/manual", JSON.stringify(controlData));
+      alert("✅ Đã gửi điều chỉnh đến ESP32");
+    }
+  </script>
+</body>
+</html>
